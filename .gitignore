@@ -1,5 +1,5 @@
 doc/serious_cryptography.pdf
-
+output/**
 Cargo.lock
 
 # Added by cargo
