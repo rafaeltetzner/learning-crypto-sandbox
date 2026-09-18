@@ -1,97 +1,87 @@
-//! Demonstrates applying a Caesar-like transformation to the pixel data of
-//! a BMP image.
+//! Demonstrates applying a Caesar-like transformation to the pixel buffer
+//! of an image, using the `image` crate to support arbitrary input formats
+//! (PNG, JPEG, BMP, GIF, etc.).
 //!
 //! The classical Caesar cipher implemented by this crate operates on
 //! alphabetic characters and therefore is not suitable for arbitrary binary
 //! data such as an image. In this example, we intentionally do not use that
-//! implementation. Instead, every pixel byte is transformed directly using
-//! `wrapping_add` and `wrapping_sub`.
+//! implementation. Instead, every channel byte in the decoded pixel buffer
+//! is transformed directly using `wrapping_add` / `wrapping_sub`.
 //!
-//! The BMP header is preserved so that the encrypted file remains a valid
-//! BMP image. Only the pixel data is transformed using wrapping arithmetic.
-//!
-//! This is intended as a demonstration of applying the idea of a Caesar
-//! shift to arbitrary bytes, rather than an implementation of the classical
-//! Caesar cipher.
+//! The alpha channel (if any) is dropped: the image is normalized to RGB8
+//! before the shift is applied, and the output is always re-encoded (here
+//! as PNG) rather than reusing the original file's container format.
+//! 
+//! The generated output files are written to the `output` directory,
+//! the overall png structure is preserved, and the image can be viewed
+//! in any standard image viewer.
 
+use image::{GenericImageView, ImageBuffer, Rgb};
 use std::fs;
 use std::io;
+use std::path::Path;
 
-const SHIFT: u8 = 42;
+// Shifts every channel byte by 128, which is equivalent to flipping the most significant bit.
+const SHIFT: u8 = 128;
 
-fn main() -> io::Result<()> {
-    let input_path = "assets/tux.bmp";
-    let encrypted_path = "output/tux_caesar_encrypted.bmp";
-    let decrypted_path = "output/tux_caesar_decrypted.bmp";
+fn shift_buffer(buf: &[u8], shift: u8, encrypt: bool) -> Vec<u8> {
+    buf.iter()
+        .map(|&byte| {
+            if encrypt {
+                byte.wrapping_add(shift)
+            } else {
+                byte.wrapping_sub(shift)
+            }
+        })
+        .collect()
+}
+
+fn save_rgb(
+    path: &str,
+    width: u32,
+    height: u32,
+    buf: Vec<u8>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let img: ImageBuffer<Rgb<u8>, _> =
+        ImageBuffer::from_raw(width, height, buf).ok_or("invalid buffer size for dimensions")?;
+    img.save(path)?;
+    Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let input_path = "assets/sample.png";
+    let encrypted_path = "output/sample_caesar_encrypted.png";
+    let decrypted_path = "output/sample_caesar_decrypted.png";
 
     fs::create_dir_all("output")?;
 
-    // Read the entire BMP file.
-    let image = fs::read(input_path)?;
-
-    // A BMP file must contain at least the 14-byte file header.
-    if image.len() < 14 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "BMP file is too small",
-        ));
+    if !Path::new(input_path).exists() {
+        return Err(Box::new(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("input image not found: {input_path}"),
+        )));
     }
 
-    // Check the BMP signature.
-    if &image[0..2] != b"BM" {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "File is not a BMP image",
-        ));
-    }
+    // Decode the image (format auto-detected from content/extension).
+    let img = image::open(input_path)?;
+    let (width, height) = img.dimensions();
 
-    // Bytes 10..14 contain the offset to the pixel data.
-    let pixel_offset = u32::from_le_bytes([
-        image[10],
-        image[11],
-        image[12],
-        image[13],
-    ]) as usize;
+    // Normalize to RGB8, dropping any alpha channel.
+    let rgb = img.to_rgb8();
+    let pixels: Vec<u8> = rgb.into_raw();
 
-    if pixel_offset > image.len() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "BMP pixel offset is outside the file",
-        ));
-    }
+    // Encrypt every channel byte.
+    let encrypted_pixels = shift_buffer(&pixels, SHIFT, true);
+    save_rgb(encrypted_path, width, height, encrypted_pixels.clone())?;
 
-    // Keep the BMP header unchanged and transform only the pixel data.
-    let (header, pixels) = image.split_at(pixel_offset);
-
-    // Encrypt each pixel byte using wrapping addition.
-    let encrypted_pixels: Vec<u8> = pixels
-        .iter()
-        .map(|&byte| byte.wrapping_add(SHIFT))
-        .collect();
-
-    // Reconstruct the encrypted BMP.
-    let mut encrypted_image = Vec::with_capacity(image.len());
-    encrypted_image.extend_from_slice(header);
-    encrypted_image.extend_from_slice(&encrypted_pixels);
-
-    fs::write(encrypted_path, encrypted_image)?;
-
-    // Decrypt each pixel byte using wrapping subtraction.
-    let decrypted_pixels: Vec<u8> = encrypted_pixels
-        .iter()
-        .map(|&byte| byte.wrapping_sub(SHIFT))
-        .collect();
-
-    // Reconstruct the decrypted BMP.
-    let mut decrypted_image = Vec::with_capacity(image.len());
-    decrypted_image.extend_from_slice(header);
-    decrypted_image.extend_from_slice(&decrypted_pixels);
-
-    fs::write(decrypted_path, decrypted_image)?;
+    // Decrypt back.
+    let decrypted_pixels = shift_buffer(&encrypted_pixels, SHIFT, false);
+    save_rgb(decrypted_path, width, height, decrypted_pixels)?;
 
     println!("Original:   {input_path}");
     println!("Encrypted:  {encrypted_path}");
     println!("Decrypted:  {decrypted_path}");
+    println!("Dimensions: {width}x{height}");
     println!("Pixel data: {} bytes", pixels.len());
     println!("Shift:      {SHIFT}");
 
