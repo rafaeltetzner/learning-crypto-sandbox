@@ -217,24 +217,6 @@ Each crate focuses on one area of cryptography; `docs/` holds the theory and con
 
 ---
 
-## Learning philosophy
-
-Implementations favor **clarity over production optimization**. For each algorithm, the goal is to work through:
-
-1. What problem does it solve?
-2. What assumptions does it make?
-3. How does the underlying math work?
-4. How is that math represented in code?
-5. What are its security properties?
-6. What can an attacker observe?
-7. What attacks are possible?
-8. What happens when the assumptions are violated?
-9. How is the algorithm used safely in real systems?
-
-Where useful, implementations are compared against established cryptographic libraries.
-
----
-
 ## References
 
 - *Serious Cryptography* — Jean-Philippe Aumasson
